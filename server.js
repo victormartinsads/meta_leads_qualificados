@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const store = require('./config/store');
-const { fetchLeadsFromSheet, getAppsScriptSnippet } = require('./services/googleSheets');
+const { fetchLeadsFromSheet, fetchLeadsFromMultipleSheets, getAppsScriptSnippet } = require('./services/googleSheets');
 const { qualifyLead } = require('./services/qualifier');
 const { sendMetaCapiEvent } = require('./services/metaCapi');
 
@@ -144,17 +144,26 @@ app.post('/api/leads/:leadId/qualify', async (req, res) => {
 // ----------------------------------------------------
 async function syncClientSheet(clientId) {
   const client = store.getClients().find(c => c.id === clientId);
-  if (!client || !client.sheetUrl) {
-    throw new Error('Cliente ou URL de planilha não informados');
+  if (!client) {
+    throw new Error('Cliente não encontrado');
+  }
+
+  const clientSheets = (Array.isArray(client.sheets) && client.sheets.length > 0)
+    ? client.sheets
+    : [{ name: 'Planilha Principal', url: client.sheetUrl, tab: client.sheetTab }];
+
+  const validSheets = clientSheets.filter(s => s && s.url && s.url.trim());
+  if (validSheets.length === 0) {
+    throw new Error('Nenhuma URL de planilha cadastrada para este cliente.');
   }
 
   store.addLog({
     type: 'SHEET_SYNC_START',
     clientId,
-    message: `Sincronizando planilha do cliente "${client.name}" (Aba: ${client.sheetTab || 'Padrão'})...`
+    message: `Sincronizando ${validSheets.length} planilha(s)/aba(s) do cliente "${client.name}"...`
   });
 
-  const { headers, leads: rawLeads } = await fetchLeadsFromSheet(client.sheetUrl, client.sheetTab);
+  const { headers, leads: rawLeads } = await fetchLeadsFromMultipleSheets(validSheets);
   const rules = store.getRules(clientId);
 
   let newLeadsCount = 0;

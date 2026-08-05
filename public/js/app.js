@@ -5,6 +5,7 @@ let currentRules = [];
 let selectedLeadForModal = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
+  renderSheetsForm([]);
   if (checkAuth()) {
     document.getElementById('loginModal').classList.remove('active');
     await loadClients();
@@ -108,21 +109,78 @@ async function onClientChange() {
   populateRuleColumnSelect();
 }
 
+function addSheetRow(sheet = {}) {
+  const container = document.getElementById('sheetsContainer');
+
+  const rowDiv = document.createElement('div');
+  rowDiv.className = 'sheet-row-item';
+  rowDiv.style.cssText = 'display: flex; gap: 0.5rem; align-items: center; background: var(--bg-dark); padding: 0.65rem; border-radius: 8px; border: 1px solid var(--border-color);';
+
+  rowDiv.innerHTML = `
+    <input type="text" class="form-control sheet-name-input" placeholder="Nome/Identificador (Ex: Form 1)" value="${sheet.name || ''}" style="flex: 1.2;">
+    <input type="url" class="form-control sheet-url-input" placeholder="Link da Planilha (https://docs.google.com/...)" value="${sheet.url || ''}" required style="flex: 2.2;">
+    <input type="text" class="form-control sheet-tab-input" placeholder="Nome da Aba/GID (Ex: Leads ou 0)" value="${sheet.tab || ''}" style="flex: 1;">
+    <button type="button" class="btn btn-danger" onclick="removeSheetRow(this)" style="padding: 0.5rem 0.75rem; font-size: 0.8rem;">🗑️</button>
+  `;
+
+  container.appendChild(rowDiv);
+}
+
+function removeSheetRow(btn) {
+  const container = document.getElementById('sheetsContainer');
+  if (container.children.length > 1) {
+    btn.closest('.sheet-row-item').remove();
+  } else {
+    alert('Você precisa manter ao menos 1 planilha/aba conectada.');
+  }
+}
+
+function getSheetsFromForm() {
+  const rows = document.querySelectorAll('.sheet-row-item');
+  const sheets = [];
+  rows.forEach((row, idx) => {
+    const name = row.querySelector('.sheet-name-input').value.trim() || `Planilha ${idx + 1}`;
+    const url = row.querySelector('.sheet-url-input').value.trim();
+    const tab = row.querySelector('.sheet-tab-input').value.trim();
+    if (url) {
+      sheets.push({ name, url, tab });
+    }
+  });
+  return sheets;
+}
+
+function renderSheetsForm(sheets = []) {
+  const container = document.getElementById('sheetsContainer');
+  container.innerHTML = '';
+
+  if (!sheets || sheets.length === 0) {
+    addSheetRow();
+    return;
+  }
+
+  sheets.forEach(s => addSheetRow(s));
+}
+
 async function saveClientForm(e) {
   e.preventDefault();
   const id = document.getElementById('clientId').value;
   const name = document.getElementById('clientName').value;
-  const sheetUrl = document.getElementById('clientSheetUrl').value;
-  const sheetTab = document.getElementById('clientSheetTab').value;
   const pixelId = document.getElementById('clientPixelId').value;
   const accessToken = document.getElementById('clientAccessToken').value;
   const testEventCode = document.getElementById('clientTestEventCode').value;
+  const sheets = getSheetsFromForm();
+
+  if (sheets.length === 0) {
+    alert('Adicione ao menos uma planilha válida.');
+    return;
+  }
 
   const payload = {
     id: id || undefined,
     name,
-    sheetUrl,
-    sheetTab,
+    sheetUrl: sheets[0].url,
+    sheetTab: sheets[0].tab,
+    sheets,
     pixelId,
     accessToken,
     testEventCode
@@ -134,7 +192,7 @@ async function saveClientForm(e) {
     body: JSON.stringify(payload)
   });
 
-  alert('Cliente salvo com sucesso!');
+  alert('Cliente salvo com sucesso com suas planilhas e abas!');
   resetClientForm();
   await loadClients();
 }
@@ -145,12 +203,15 @@ function editClient(id) {
 
   document.getElementById('clientId').value = client.id;
   document.getElementById('clientName').value = client.name;
-  document.getElementById('clientSheetUrl').value = client.sheetUrl;
-  document.getElementById('clientSheetTab').value = client.sheetTab || '';
   document.getElementById('clientPixelId').value = client.pixelId;
   document.getElementById('clientAccessToken').value = client.accessToken;
   document.getElementById('clientTestEventCode').value = client.testEventCode || '';
   
+  const clientSheets = (Array.isArray(client.sheets) && client.sheets.length > 0)
+    ? client.sheets
+    : [{ name: 'Planilha Principal', url: client.sheetUrl || '', tab: client.sheetTab || '' }];
+
+  renderSheetsForm(clientSheets);
   switchTab('clientsTab');
 }
 
@@ -163,11 +224,10 @@ async function deleteClient(id) {
 function resetClientForm() {
   document.getElementById('clientId').value = '';
   document.getElementById('clientName').value = '';
-  document.getElementById('clientSheetUrl').value = '';
-  document.getElementById('clientSheetTab').value = '';
   document.getElementById('clientPixelId').value = '';
   document.getElementById('clientAccessToken').value = '';
   document.getElementById('clientTestEventCode').value = '';
+  renderSheetsForm([]);
 }
 
 function renderClientsTable() {
@@ -181,11 +241,19 @@ function renderClientsTable() {
 
   clients.forEach(c => {
     const tr = document.createElement('tr');
-    const tabInfo = c.sheetTab ? `<br><small style="color: var(--text-muted);">Aba: ${c.sheetTab}</small>` : '';
+    const cSheets = (Array.isArray(c.sheets) && c.sheets.length > 0) 
+      ? c.sheets 
+      : [{ name: 'Planilha Principal', url: c.sheetUrl, tab: c.sheetTab }];
+
+    const sheetsHtml = cSheets.map(s => {
+      const tabStr = s.tab ? ` (Aba: ${s.tab})` : '';
+      return `<div><a href="${s.url}" target="_blank" style="color: var(--primary);">📄 ${s.name}${tabStr} 🔗</a></div>`;
+    }).join('');
+
     tr.innerHTML = `
       <td><strong>${c.name}</strong></td>
       <td><code>${c.pixelId || 'Sem Pixel'}</code></td>
-      <td><a href="${c.sheetUrl}" target="_blank" style="color: var(--primary);">Abrir Planilha 🔗</a>${tabInfo}</td>
+      <td>${sheetsHtml}</td>
       <td>${c.lastSync ? new Date(c.lastSync).toLocaleString('pt-BR') : 'Nunca'}</td>
       <td>
         <button class="btn btn-secondary" onclick="editClient('${c.id}')">✏️ Editar</button>

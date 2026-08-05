@@ -178,6 +178,47 @@ async function fetchLeadsFromSheet(sheetUrl, sheetTab) {
 }
 
 /**
+ * Fetch leads from multiple Google Sheets / Tabs for a client
+ */
+async function fetchLeadsFromMultipleSheets(sheets = []) {
+  if (!Array.isArray(sheets) || sheets.length === 0) {
+    return { headers: [], leads: [] };
+  }
+
+  const allHeadersSet = new Set();
+  const allLeads = [];
+
+  for (let i = 0; i < sheets.length; i++) {
+    const item = sheets[i];
+    const sheetUrl = typeof item === 'string' ? item : item.url;
+    const sheetTab = typeof item === 'object' ? item.tab : null;
+    const sheetName = typeof item === 'object' ? (item.name || `Planilha ${i + 1}`) : `Planilha ${i + 1}`;
+
+    if (!sheetUrl) continue;
+
+    try {
+      const { headers, leads } = await fetchLeadsFromSheet(sheetUrl, sheetTab);
+      headers.forEach(h => allHeadersSet.add(h));
+
+      leads.forEach(l => {
+        l.sourceSheetName = sheetName;
+        if (l.answers) {
+          l.answers['_origem_planilha'] = sheetName;
+        }
+        allLeads.push(l);
+      });
+    } catch (err) {
+      console.error(`Erro ao ler ${sheetName}:`, err.message);
+    }
+  }
+
+  return {
+    headers: Array.from(allHeadersSet),
+    leads: allLeads
+  };
+}
+
+/**
  * Generate Google Apps Script code snippet for instant push webhooks
  */
 function getAppsScriptSnippet(serverWebhookUrl) {
@@ -225,5 +266,6 @@ module.exports = {
   getCsvUrl,
   parseCsv,
   fetchLeadsFromSheet,
+  fetchLeadsFromMultipleSheets,
   getAppsScriptSnippet
 };
