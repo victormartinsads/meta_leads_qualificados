@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Qualificação de Leads | Meta Conversions API (CAPI)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div class="brand-title">
+        <h1>Meta Lead Qualifier</h1>
+        <p>Conversions API for Leads (CAPI)</p>
+      </div>
+    </div>
+    
+    <div class="header-actions">
+      <select id="clientSelect" class="select-client" onchange="onClientChange()">
+        <option value="">Carregando clientes...</option>
+      </select>
+
+      <button class="btn btn-primary" onclick="syncCurrentClient()">
+        🔄 Sincronizar Planilha
+      </button>
+
+      <button class="btn btn-secondary" onclick="openTestCapiModal()">
+        🧪 Testar Meta CAPI
+      </button>
+
+      <button class="btn btn-danger" onclick="logoutSystem()" style="padding: 0.55rem 0.85rem;">
+        🚪 Sair
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <div class="container">
+
+    <!-- Stats Bar -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div>
+          <div class="stat-label">Total de Leads</div>
+          <div class="stat-value" id="statTotal">0</div>
+        </div>
+        <div class="stat-icon total">👥</div>
+      </div>
+
+      <div class="stat-card">
+        <div>
+          <div class="stat-label">Leads Qualificados</div>
+          <div class="stat-value" id="statQualified" style="color: #34d399;">0</div>
+        </div>
+        <div class="stat-icon qualified">✅</div>
+      </div>
+
+      <div class="stat-card">
+        <div>
+          <div class="stat-label">Pendentes</div>
+          <div class="stat-value" id="statPending" style="color: #fbbf24;">0</div>
+        </div>
+        <div class="stat-icon pending">⏳</div>
+      </div>
+
+      <div class="stat-card">
+        <div>
+          <div class="stat-label">Enviados ao Meta CAPI</div>
+          <div class="stat-value" id="statCapi" style="color: #60a5fa;">0</div>
+        </div>
+        <div class="stat-icon capi">🚀</div>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="tabs-nav">
+      <button class="tab-btn active" onclick="switchTab('leadsTab', this)">📋 Leads & Qualificação</button>
+      <button class="tab-btn" onclick="switchTab('rulesTab', this)">⚡ Regras de Filtro por Formulário</button>
+      <button class="tab-btn" onclick="switchTab('clientsTab', this)">⚙️ Clientes & Conexão Meta</button>
+      <button class="tab-btn" onclick="switchTab('logsTab', this)">📜 Histórico Meta CAPI</button>
+    </div>
+
+    <!-- TAB 1: LEADS & QUALIFICAÇÃO -->
+    <div id="leadsTab" class="tab-content active">
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">Lista de Leads do Formulário Nativo</div>
+          <div style="display: flex; gap: 0.5rem;">
+            <select id="filterStatus" class="select-client" onchange="renderLeadsTable()">
+              <option value="ALL">Todos os Status</option>
+              <option value="QUALIFICADO">Apenas Qualificados</option>
+              <option value="PENDENTE">Apenas Pendentes</option>
+              <option value="DESQUALIFICADO">Apenas Desqualificados</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>Data / Hora</th>
+                <th>Lead ID (Meta)</th>
+                <th>Nome / Contato</th>
+                <th>Campanha / Ad</th>
+                <th>Status</th>
+                <th>Envio Meta CAPI</th>
+                <th>Ações de Qualificação</th>
+              </tr>
+            </thead>
+            <tbody id="leadsTableBody">
+              <tr>
+                <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                  Selecione um cliente e clique em "Sincronizar Planilha" para carregar os leads.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: REGRAS AUTOMÁTICAS -->
+    <div id="rulesTab" class="tab-content">
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">Nova Regra de Qualificação Automática</div>
+        </div>
+        
+        <form id="ruleForm" onsubmit="saveRule(event)">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Nome da Regra</label>
+              <input type="text" id="ruleName" class="form-control" placeholder="Ex: Dívida acima de 100k" required>
+            </div>
+            
+            <div class="form-group">
+              <label>Coluna / Pergunta do Formulário</label>
+              <select id="ruleColumnSelect" class="form-control" required>
+                <option value="">Aguardando sincronização da planilha...</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Condição / Operador</label>
+              <select id="ruleOperator" class="form-control" required>
+                <option value="contains">Contém o texto</option>
+                <option value="equals">É exatamente igual a</option>
+                <option value="not_contains">Não contém o texto</option>
+                <option value="greater_than">Maior ou Igual a (Número/Valor)</option>
+                <option value="in_list">Contém qualquer um da lista (separado por vírgula)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Valor Esperado</label>
+              <input type="text" id="ruleValue" class="form-control" placeholder="Ex: 100 mil ou Sócio" required>
+            </div>
+
+            <div class="form-group">
+              <label>Ação Resultante</label>
+              <select id="ruleAction" class="form-control" required>
+                <option value="QUALIFICADO">Qualificar e Enviar para o Meta Ads</option>
+                <option value="DESQUALIFICADO">Desqualificar (Descartar)</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end;">
+            <button type="submit" class="btn btn-primary">➕ Salvar Regra</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">Regras Ativas para Este Cliente</div>
+        </div>
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>Nome da Regra</th>
+                <th>Pergunta / Coluna</th>
+                <th>Condição</th>
+                <th>Valor Alvo</th>
+                <th>Ação</th>
+                <th>Remover</th>
+              </tr>
+            </thead>
+            <tbody id="rulesTableBody">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted);">Sem regras cadastradas.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: CLIENTES & CONEXÃO META -->
+    <div id="clientsTab" class="tab-content">
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">Cadastrar / Editar Cliente</div>
+        </div>
+        <form id="clientForm" onsubmit="saveClientForm(event)">
+          <input type="hidden" id="clientId">
+          <div class="form-row">
+            <div class="form-group" style="flex: 1.5;">
+              <label>Nome do Cliente / Projeto</label>
+              <input type="text" id="clientName" class="form-control" placeholder="Ex: Advocacia Tributária" required>
+            </div>
+            <div class="form-group" style="flex: 2;">
+              <label>Link da Planilha Google (Visualização por link)</label>
+              <input type="url" id="clientSheetUrl" class="form-control" placeholder="https://docs.google.com/spreadsheets/d/..." required>
+            </div>
+            <div class="form-group" style="flex: 1;">
+              <label>Nome da Aba ou GID (Opcional)</label>
+              <input type="text" id="clientSheetTab" class="form-control" placeholder="Ex: Página1 ou Leads">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Meta Pixel ID / Dataset ID</label>
+              <input type="text" id="clientPixelId" class="form-control" placeholder="Ex: 123456789012345" required>
+            </div>
+            <div class="form-group">
+              <label>Meta Access Token (Token de Acesso do Gerenciador de Eventos)</label>
+              <input type="text" id="clientAccessToken" class="form-control" placeholder="EAA..." required>
+            </div>
+            <div class="form-group">
+              <label>Código de Evento de Teste (Test Event Code - Opcional)</label>
+              <input type="text" id="clientTestEventCode" class="form-control" placeholder="Ex: TEST12345">
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+            <button type="button" class="btn btn-secondary" onclick="resetClientForm()">Limpar</button>
+            <button type="submit" class="btn btn-primary">💾 Salvar Configurações do Cliente</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">Clientes Cadastrados</div>
+        </div>
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>Pixel ID Meta</th>
+                <th>Planilha</th>
+                <th>Última Sincronização</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="clientsTableBody">
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">⚡ Automação Instantânea via Google Apps Script (Opcional)</div>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+          Se você deseja que novos leads sejam enviados para este sistema instantaneamente no segundo que caírem na planilha, você pode colar este código no Apps Script da sua planilha do Google:
+        </p>
+        <button class="btn btn-secondary" onclick="copyAppsScriptSnippet()">📋 Copiar Script do Google Sheets</button>
+      </div>
+    </div>
+
+    <!-- TAB 4: LOGS META CAPI -->
+    <div id="logsTab" class="tab-content">
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">Histórico de Disparos e Sincronização</div>
+        </div>
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>Data / Hora</th>
+                <th>Tipo</th>
+                <th>Mensagem</th>
+              </tr>
+            </thead>
+            <tbody id="logsTableBody">
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- MODAL: DETALHES DO LEAD -->
+  <div id="leadModal" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modalLeadTitle">Detalhes do Lead</h3>
+        <button class="close-btn" onclick="closeModal('leadModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="modalLeadBody" class="lead-detail-grid">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger" onclick="changeLeadStatusFromModal('DESQUALIFICADO')">❌ Desqualificar</button>
+        <button class="btn btn-success" onclick="changeLeadStatusFromModal('QUALIFICADO')">✅ Qualificar e Enviar CAPI Meta</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: TESTE CAPI -->
+  <div id="testCapiModal" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Testar Conexão com Meta Conversions API (CAPI)</h3>
+        <button class="close-btn" onclick="closeModal('testCapiModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+          Isso enviará um evento fictício de <strong>QualifiedLead</strong> para o Gerenciador de Eventos da Meta para validar se o seu Pixel ID e Access Token estão funcionando corretamente.
+        </p>
+        <div class="form-group">
+          <label>Pixel ID / Dataset ID</label>
+          <input type="text" id="testPixelId" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label>Access Token</label>
+          <input type="text" id="testAccessToken" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label>Test Event Code (Copie do Gerenciador de Eventos -> Testar Eventos)</label>
+          <input type="text" id="testEventCodeInput" class="form-control" placeholder="Ex: TEST12345">
+        </div>
+        <div id="testResultOutput" style="margin-top: 1rem;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('testCapiModal')">Fechar</button>
+        <button class="btn btn-primary" onclick="runTestCapi()">🚀 Enviar Evento de Teste</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: TELA DE LOGIN -->
+  <div id="loginModal" class="modal-backdrop active" style="z-index: 9999;">
+    <div class="modal" style="max-width: 420px; border: 1px solid var(--primary); box-shadow: 0 0 30px rgba(99, 102, 241, 0.25);">
+      <div class="modal-header" style="text-align: center; justify-content: center; background: rgba(99, 102, 241, 0.1);">
+        <div>
+          <div style="font-size: 2.2rem; margin-bottom: 0.25rem;">🔒</div>
+          <h3 style="font-size: 1.25rem; font-weight: 800;">Acesso Restrito</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted);">Meta Lead Qualifier System</p>
+        </div>
+      </div>
+      <div class="modal-body">
+        <form id="loginForm" onsubmit="submitLogin(event)">
+          <div class="form-group">
+            <label>Usuário</label>
+            <input type="text" id="loginUsername" class="form-control" placeholder="@agenciaand" required autofocus>
+          </div>
+          <div class="form-group">
+            <label>Senha</label>
+            <input type="password" id="loginPassword" class="form-control" placeholder="••••••••" required>
+          </div>
+          <div id="loginError" style="color: var(--danger); font-size: 0.85rem; margin-bottom: 1rem; display: none;"></div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 0.75rem;">🔑 Entrar no Sistema</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
