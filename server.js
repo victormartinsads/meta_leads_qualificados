@@ -163,7 +163,7 @@ async function syncClientSheet(clientId) {
     message: `Sincronizando ${validSheets.length} planilha(s)/aba(s) do cliente "${client.name}"...`
   });
 
-  const { headers, leads: rawLeads } = await fetchLeadsFromMultipleSheets(validSheets);
+  const { headers, leads: rawLeads, errors } = await fetchLeadsFromMultipleSheets(validSheets);
   const rules = store.getRules(clientId);
 
   let newLeadsCount = 0;
@@ -229,7 +229,12 @@ async function syncClientSheet(clientId) {
   client.sheetHeaders = headers;
   store.saveClient(client);
 
-  const summaryMessage = `Sincronização concluída: ${rawLeads.length} leads na planilha. ${newLeadsCount} novos, ${autoQualifiedCount} qualificados por regras e ${capiSentCount} enviados ao Meta.`;
+  let summaryMessage = `Sincronização concluída: ${rawLeads.length} leads importados de ${validSheets.length} planilha(s). ${newLeadsCount} novos, ${autoQualifiedCount} qualificados por regras e ${capiSentCount} enviados ao Meta.`;
+  
+  if (errors && errors.length > 0) {
+    summaryMessage += ` (Aviso: ${errors.join(' | ')})`;
+  }
+
   store.addLog({
     type: 'SHEET_SYNC_COMPLETE',
     clientId,
@@ -242,6 +247,7 @@ async function syncClientSheet(clientId) {
     newLeadsCount,
     autoQualifiedCount,
     capiSentCount,
+    errors,
     message: summaryMessage
   };
 }

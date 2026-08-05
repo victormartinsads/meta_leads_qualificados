@@ -90,10 +90,15 @@ async function fetchLeadsFromSheet(sheetUrl, sheetTab) {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) LeadQualifierBot/1.0'
     },
-    timeout: 10000
+    timeout: 6000
   });
 
-  const rows = parseCsv(response.data);
+  const textData = String(response.data || '');
+  if (textData.trim().startsWith('<') || textData.includes('<!DOCTYPE html>') || textData.includes('<html')) {
+    throw new Error('Planilha privada ou inacessível. Altere a permissão da planilha no Google Sheets para "Qualquer pessoa com o link pode ver".');
+  }
+
+  const rows = parseCsv(textData);
   if (rows.length < 2) {
     return { headers: [], leads: [] };
   }
@@ -119,7 +124,7 @@ async function fetchLeadsFromSheet(sheetUrl, sheetTab) {
   const idIdx = getIndex(['id', 'lead_id', 'id_do_lead']);
   const emailIdx = getIndex(['email', 'e-mail']);
   const nameIdx = getIndex(['nome_completo', 'nome', 'name', 'full_name']);
-  const phoneIdx = getIndex(['telefone', 'phone', 'celular', 'whatsapp']);
+  const phoneIdx = getIndex(['telefone', 'phone', 'celular', 'whatsapp', 'phone_number', 'telefone_de_contato']);
   const statusIdx = getIndex(['lead_status', 'status', 'qualificado']);
   const createdIdx = getIndex(['created_time', 'data', 'data_criacao']);
   const cityIdx = getIndex(['cidade', 'city', 'municipio']);
@@ -178,43 +183,56 @@ async function fetchLeadsFromSheet(sheetUrl, sheetTab) {
 }
 
 /**
- * Fetch leads from multiple Google Sheets / Tabs for a client
+ * Fetch leads from multiple Google Sheets / Tabs for a client (in parallel with safety)
  */
 async function fetchLeadsFromMultipleSheets(sheets = []) {
   if (!Array.isArray(sheets) || sheets.length === 0) {
     return { headers: [], leads: [] };
   }
 
-  const allHeadersSet = new Set();
-  const allLeads = [];
+  const validItems = sheets.filter(item => {
+    const url = typeof item === 'string' ? item : item?.url;
+    return url && url.trim().length > 0;
+  });
 
-  for (let i = 0; i < sheets.length; i++) {
-    const item = sheets[i];
+  const promises = validItems.map(async (item, i) => {
     const sheetUrl = typeof item === 'string' ? item : item.url;
     const sheetTab = typeof item === 'object' ? item.tab : null;
     const sheetName = typeof item === 'object' ? (item.name || `Planilha ${i + 1}`) : `Planilha ${i + 1}`;
 
-    if (!sheetUrl) continue;
-
     try {
-      const { headers, leads } = await fetchLeadsFromSheet(sheetUrl, sheetTab);
-      headers.forEach(h => allHeadersSet.add(h));
+      const res = await fetchLeadsFromSheet(sheetUrl, sheetTab);
+      return { success: true, sheetName, ...res };
+    } catch (err) {
+      console.error(`Aviso: Falha ao ler "${sheetName}":`, err.message);
+      return { success: false, sheetName, error: err.message, headers: [], leads: [] };
+    }
+  });
 
-      leads.forEach(l => {
-        l.sourceSheetName = sheetName;
-        if (l.answers) {
-          l.answers['_origem_planilha'] = sheetName;
-        }
+  const results = await Promise.all(promises);
+
+  const allHeadersSet = new Set();
+  const allLeads = [];
+  const errors = [];
+
+  results.forEach(res => {
+    if (res.headers) res.headers.forEach(h => allHeadersSet.add(h));
+    if (res.leads) {
+      res.leads.forEach(l => {
+        l.sourceSheetName = res.sheetName;
+        if (l.answers) l.answers['_origem_planilha'] = res.sheetName;
         allLeads.push(l);
       });
-    } catch (err) {
-      console.error(`Erro ao ler ${sheetName}:`, err.message);
     }
-  }
+    if (!res.success && res.error) {
+      errors.push(`${res.sheetName}: ${res.error}`);
+    }
+  });
 
   return {
     headers: Array.from(allHeadersSet),
-    leads: allLeads
+    leads: allLeads,
+    errors
   };
 }
 
