@@ -426,9 +426,18 @@ async function syncCurrentClient() {
   }
 
   const client = clients.find(c => c.id === currentClientId);
-  if (!client || !client.sheetUrl) {
-    alert('Cadastre a URL da planilha para este cliente nas configurações.');
+  const hasSheets = client && ((client.sheets && client.sheets.some(s => s.url && s.url.trim())) || (client.sheetUrl && client.sheetUrl.trim()));
+  
+  if (!client || !hasSheets) {
+    alert('Cadastre ao menos uma URL de planilha para este cliente na aba "Clientes & Conexão Meta".');
     return;
+  }
+
+  const syncBtn = document.querySelector('button[onclick="syncCurrentClient()"]');
+  const originalText = syncBtn ? syncBtn.innerHTML : '';
+  if (syncBtn) {
+    syncBtn.disabled = true;
+    syncBtn.innerHTML = '⏳ Sincronizando...';
   }
 
   try {
@@ -445,6 +454,11 @@ async function syncCurrentClient() {
     }
   } catch (err) {
     alert('Erro de conexão ao sincronizar planilha: ' + err.message);
+  } finally {
+    if (syncBtn) {
+      syncBtn.disabled = false;
+      syncBtn.innerHTML = originalText;
+    }
   }
 }
 
