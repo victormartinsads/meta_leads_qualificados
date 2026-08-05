@@ -4,7 +4,7 @@ const path = require('path');
 const store = require('./config/store');
 const { fetchLeadsFromSheet, fetchLeadsFromMultipleSheets, getAppsScriptSnippet } = require('./services/googleSheets');
 const { qualifyLead } = require('./services/qualifier');
-const { sendMetaCapiEvent } = require('./services/metaCapi');
+const { sendMetaCapiEvent, sendMetaCapiEventsBatch } = require('./services/metaCapi');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -172,12 +172,13 @@ async function syncClientSheet(clientId) {
 
   const existingLeads = store.getLeads(clientId);
 
+  const pendingCapiLeads = [];
+  const leadsToSave = [];
+
   for (const rawLead of rawLeads) {
     rawLead.clientId = clientId;
 
     const existing = existingLeads.find(l => l.lead_id === rawLead.lead_id);
-    
-    // Evaluate qualification rules
     const result = qualifyLead(rawLead, rules);
 
     const mergedLead = {
@@ -190,40 +191,48 @@ async function syncClientSheet(clientId) {
 
     if (!existing) newLeadsCount++;
 
-    // Auto send to Meta if auto-qualified and not sent yet
     if (mergedLead.lead_status === 'QUALIFICADO' && !mergedLead.metaSent && client.pixelId && client.accessToken) {
       autoQualifiedCount++;
-
-      const capiRes = await sendMetaCapiEvent({
-        pixelId: client.pixelId,
-        accessToken: client.accessToken,
-        testEventCode: client.testEventCode,
-        eventName: 'QualifiedLead',
-        leadId: mergedLead.lead_id,
-        email: mergedLead.email,
-        phone: mergedLead.phone,
-        fullName: mergedLead.name,
-        city: mergedLead.city,
-        state: mergedLead.state,
-        zip: mergedLead.zip,
-        dob: mergedLead.dob,
-        customData: {
-          reason: result.reason,
-          ruleName: result.matchedRule ? result.matchedRule.name : 'Auto'
-        }
+      pendingCapiLeads.push({
+        ...mergedLead,
+        reason: result.reason,
+        ruleName: result.matchedRule ? result.matchedRule.name : 'Auto'
       });
-
-      if (capiRes.success) {
-        mergedLead.metaSent = true;
-        mergedLead.metaSentAt = new Date().toISOString();
-        capiSentCount++;
-      } else {
-        mergedLead.metaError = capiRes.error;
-      }
     }
 
-    store.saveLead(mergedLead);
+    leadsToSave.push(mergedLead);
   }
+
+  // Batch send to Meta CAPI in 1 fast HTTP request instead of slow individual calls
+  if (pendingCapiLeads.length > 0) {
+    const batchRes = await sendMetaCapiEventsBatch({
+      pixelId: client.pixelId,
+      accessToken: client.accessToken,
+      testEventCode: client.testEventCode,
+      leads: pendingCapiLeads
+    });
+
+    const nowIso = new Date().toISOString();
+    if (batchRes.success) {
+      capiSentCount = pendingCapiLeads.length;
+      const sentIds = new Set(pendingCapiLeads.map(l => l.lead_id));
+      leadsToSave.forEach(l => {
+        if (sentIds.has(l.lead_id)) {
+          l.metaSent = true;
+          l.metaSentAt = nowIso;
+        }
+      });
+    } else {
+      const errStr = JSON.stringify(batchRes.error || {});
+      leadsToSave.forEach(l => {
+        if (pendingCapiLeads.some(p => p.lead_id === l.lead_id)) {
+          l.metaError = errStr;
+        }
+      });
+    }
+  }
+
+  leadsToSave.forEach(l => store.saveLead(l));
 
   client.lastSync = new Date().toISOString();
   client.sheetHeaders = headers;

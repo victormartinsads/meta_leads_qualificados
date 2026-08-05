@@ -149,8 +149,93 @@ async function sendMetaCapiEvent({
   }
 }
 
+/**
+ * Send batch of conversion events to Meta Conversions API (Up to 1000 events in 1 fast HTTP request)
+ */
+async function sendMetaCapiEventsBatch({
+  pixelId,
+  accessToken,
+  testEventCode,
+  leads = []
+}) {
+  if (!pixelId || !accessToken || !Array.isArray(leads) || leads.length === 0) {
+    return { success: true, eventsReceived: 0 };
+  }
+
+  const events = leads.map(item => {
+    const { fn, ln } = extractNames(item.name);
+    const hashedEmail = hashSha256(item.email || 'lead_qualificado@exemplo.com.br');
+    const hashedPhone = normalizePhone(item.phone || '5511999999999');
+    const hashedCountry = hashSha256(item.country || 'br');
+    const hashedExternalId = hashSha256(item.lead_id || item.email || item.phone || 'lead_' + Date.now());
+
+    const userData = {
+      em: [hashedEmail],
+      ph: [hashedPhone],
+      country: [hashedCountry],
+      external_id: [hashedExternalId]
+    };
+
+    if (item.lead_id && /^\d+$/.test(String(item.lead_id).trim())) {
+      userData.lead_id = String(item.lead_id).trim();
+    }
+
+    if (fn) userData.fn = [fn];
+    if (ln) userData.ln = [ln];
+    if (item.city) userData.ct = [hashSha256(item.city)];
+    if (item.state) userData.st = [normalizeState(item.state)];
+
+    return {
+      event_name: item.eventName || 'QualifiedLead',
+      event_time: Math.floor(Date.now() / 1000),
+      action_source: 'system_generated',
+      event_source_url: 'http://localhost:3000',
+      user_data: userData,
+      custom_data: {
+        currency: item.currency || 'BRL',
+        value: parseFloat(item.value) || 0,
+        lead_event_source: 'Google Sheets / Meta Lead Ads',
+        lead_status: 'QUALIFICADO',
+        reason: item.reason || 'Regra de filtro',
+        ruleName: item.ruleName || 'Auto'
+      }
+    };
+  });
+
+  const payload = { data: events };
+  if (testEventCode && testEventCode.trim()) {
+    payload.test_event_code = testEventCode.trim().toUpperCase();
+  }
+
+  const cleanPixelId = String(pixelId).trim();
+  const cleanToken = String(accessToken).trim();
+  const url = `https://graph.facebook.com/v20.0/${cleanPixelId}/events?access_token=${cleanToken}`;
+
+  try {
+    const response = await axios.post(url, payload, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 10000
+    });
+
+    return {
+      success: true,
+      data: response.data,
+      eventsReceived: response.data?.events_received || events.length,
+      fbtraceId: response.data?.fbtrace_id
+    };
+  } catch (error) {
+    const errorDetails = error.response?.data || { message: error.message };
+    console.error('Meta CAPI Batch Error:', JSON.stringify(errorDetails));
+    return {
+      success: false,
+      error: errorDetails
+    };
+  }
+}
+
 module.exports = {
   sendMetaCapiEvent,
+  sendMetaCapiEventsBatch,
   hashSha256,
   normalizePhone,
   extractNames
